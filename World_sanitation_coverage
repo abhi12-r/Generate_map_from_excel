@@ -1,0 +1,125 @@
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
+# The CSV file has a complex header. We read it by specifying header=2,
+# which uses the third row (0-indexed) for column names.
+try:
+    df = pd.read_csv('Project and Reoprts - Sheet4.csv', header=2)
+except FileNotFoundError:
+    print("Error: The file 'Project and Reoprts - Sheet4.csv' was not found.")
+    print("Please make sure the file is in the same directory as this notebook.")
+    exit()
+
+# The column names were read as 'Unnamed: 0' and 'Unnamed: 1' because of the header structure.
+# We correct this by renaming them to 'Country' and 'ISO3' for easier access.
+df.rename(columns={
+    'Unnamed: 0': 'Country',
+    'Unnamed: 1': 'ISO3'
+}, inplace=True)
+
+# Helper function to replace special characters and convert data to numeric.
+def clean_data(series):
+    # Convert to string and remove spaces before replacing special characters
+    series = series.astype(str).str.replace(' ', '').str.replace(',', '')
+    # This ensures that any non-numeric values are treated as missing (NA)
+    series = series.replace(['<1', '-'], pd.NA)
+    return pd.to_numeric(series, errors='coerce')
+
+# --- Calculate the new metrics as requested ---
+# Total Sewer Connection is in column 'Sewer connections.2'
+df['Total Sewer Connection %'] = clean_data(df['Sewer connections.2'])
+
+# Urban Sewer Connection is in column 'Sewer connections.1'
+df['Urban Sewer Connection %'] = clean_data(df['Sewer connections.1'])
+
+# Rural Sewer Connection is in column 'Sewer connections'
+df['Rural Sewer Connection %'] = clean_data(df['Sewer connections'])
+
+# Urban OSS (Septic System & Latrines combined)
+# First, clean the individual columns and then add them numerically.
+urban_latrines = clean_data(df['Latrines and other.1'])
+urban_septics = clean_data(df['Septic tanks.1'])
+df['Urban OSS %'] = urban_latrines.fillna(0) + urban_septics.fillna(0)
+
+# Rural OSS (Septic System & Latrines combined)
+# First, clean the individual columns and then add them numerically.
+rural_latrines = clean_data(df['Latrines and other'])
+rural_septics = clean_data(df['Septic tanks'])
+df['Rural OSS %'] = rural_latrines.fillna(0) + rural_septics.fillna(0)
+
+# Total OSS (Septic System & Latrines combined)
+# This combines 'Latrines and other.2' and 'Septic tanks.2' from the original dataset
+total_latrines = clean_data(df['Latrines and other.2'])
+total_septics = clean_data(df['Septic tanks.2'])
+df['Total OSS %'] = total_latrines.fillna(0) + total_septics.fillna(0)
+
+
+# Define lists of key countries for Global North and Global South.
+global_north = ['United States', 'Germany', 'United Kingdom', 'Japan', 'France', 'Canada', 'Australia']
+global_south = ['India', 'Brazil', 'Nigeria', 'South Africa', 'Mexico', 'Indonesia', 'Egypt']
+key_countries_df = df[df['Country'].isin(global_north + global_south)].copy()
+
+# Add a column to categorize each country as 'Global North' or 'Global South'.
+key_countries_df['Category'] = key_countries_df['Country'].apply(
+    lambda x: 'Global North' if x in global_north else 'Global South'
+)
+
+# --- Visualization Function to reduce code repetition ---
+def create_plots(data_df, value_column, title_prefix):
+    """Generates and displays a world map and a table for a given sanitation metric."""
+    
+    # Create the World Map.
+    fig_map = px.choropleth(
+        data_df,
+        locations='ISO3',
+        color=value_column,
+        hover_name='Country',
+        color_continuous_scale='RdYlGn',
+        title=f'{title_prefix} Coverage Worldwide',
+        labels={value_column: f'{title_prefix} (%)'},
+        height=600,
+    )
+    fig_map.update_layout(
+        title_text=f'{title_prefix} Coverage Worldwide',
+        geo=dict(
+            showframe=False,
+            showcoastlines=False,
+            projection_type='equirectangular'
+        ),
+        coloraxis_colorbar=dict(
+            len=0.7,
+            thickness=20,
+            title_font_size=12,
+            x=0.05,
+        )
+    )
+    fig_map.show()
+    fig_map.write_image(f'{title_prefix}_Map.png', scale=2)
+
+    # Create the Tabular Plot.
+    fig_table = go.Figure(data=[go.Table(
+        header=dict(values=['Country', 'Category', value_column],
+                    fill_color='#2c3e50',
+                    font=dict(color='white', size=14),
+                    align='left'),
+        cells=dict(values=[key_countries_df['Country'], key_countries_df['Category'], key_countries_df[value_column]],
+                   fill_color=[
+                       ['#f0f0f0', '#e0e0e0'] * (len(key_countries_df) // 2 + 1),
+                       ['#f0f0f0', '#e0e0e0'] * (len(key_countries_df) // 2 + 1),
+                       ['#f0f0f0', '#e0e0e0'] * (len(key_countries_df) // 2 + 1)
+                   ],
+                   align='left'))
+    ])
+    
+    fig_table.update_layout(title_text=f'{title_prefix} for Global North & South')
+    fig_table.show()
+    fig_table.write_image(f'{title_prefix}_Table.png', scale=2)
+
+# --- Generate all six sets of plots using the function ---
+create_plots(df, 'Total Sewer Connection %', 'Total Sewer Connection')
+create_plots(df, 'Urban Sewer Connection %', 'Urban Sewer Connection')
+create_plots(df, 'Rural Sewer Connection %', 'Rural Sewer Connection')
+create_plots(df, 'Urban OSS %', 'Urban OSS')
+create_plots(df, 'Rural OSS %', 'Rural OSS')
+create_plots(df, 'Total OSS %', 'Total OSS')
